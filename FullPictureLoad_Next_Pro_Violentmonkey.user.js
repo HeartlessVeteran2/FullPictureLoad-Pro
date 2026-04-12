@@ -542,8 +542,10 @@ if (this.fancyboxLoaded) return;
 const css = await GM.getResourceText("FancyboxV6Css");
 const js = await GM.getResourceText("FancyboxV6JS");
 
-await GM.addElement("style", { textContent: css });
-await GM.addElement("script", { textContent: js });
+await Promise.all([
+GM.addElement("style", { textContent: css }),
+GM.addElement("script", { textContent: js })
+]);
 
 await $.wait(() => window.Fancybox);
 this.fancyboxLoaded = true;
