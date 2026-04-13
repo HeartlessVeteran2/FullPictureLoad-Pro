@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name 圖片全載Next Pro (Violentmonkey)
-// @name:en Full Picture Load Next Pro (Violentmonkey)
-// @name:zh-CN 图片全载Next Pro (Violentmonkey版)
-// @version 2026.4.0-VM
-// @description 支持寫真、H漫、漫畫的網站1000+，Violentmonkey優化版，無限滾動閱讀模式，ZIP打包下載
-// @description:en Modern image batch downloader optimized for Violentmonkey - 1000+ sites, infinite scroll, ZIP packaging
+// @name 圖片全載Next Pro
+// @name:en Full Picture Load Next Pro
+// @name:zh-CN 图片全载Next Pro
+// @version 2026.4.0
+// @description 支持寫真、H漫、漫畫的網站1000+，現代化圖片全載腳本，無限滾動閱讀模式，ZIP打包下載
+// @description:en Modern image batch downloader supporting 1000+ sites, infinite scroll, ZIP packaging
 // @author Aura (based on 德克斯DEX)
 // @match *://*/*
 // @connect *
@@ -13,15 +13,25 @@
 // @exclude *google*/maps/*
 // @exclude *mail.google.com*
 // @exclude *accounts.google.com*
+// @grant GM_xmlhttpRequest
 // @grant GM.xmlHttpRequest
+// @grant GM_registerMenuCommand
 // @grant GM.registerMenuCommand
+// @grant GM_unregisterMenuCommand
 // @grant GM.unregisterMenuCommand
+// @grant GM_openInTab
 // @grant GM.openInTab
+// @grant GM_getValue
 // @grant GM.getValue
+// @grant GM_setValue
 // @grant GM.setValue
+// @grant GM_listValues
 // @grant GM.listValues
+// @grant GM_deleteValue
 // @grant GM.deleteValue
+// @grant GM_getResourceText
 // @grant GM.getResourceText
+// @grant GM_addElement
 // @grant GM.addElement
 // @grant unsafeWindow
 // @grant window.close
@@ -36,12 +46,6 @@
 // @resource ViewerJs https://unpkg.com/viewerjs@1.11.7/dist/viewer.min.js
 // @resource ViewerJsCss https://unpkg.com/viewerjs@1.11.7/dist/viewer.min.css
 // ==/UserScript==
-
-// ============================================
-// VIOLENTMONKEY OPTIMIZED VERSION
-// Features: Uses GM.* API, compatible with VM-specific features
-// Note: GM_download and GM_notification not available in VM
-// ============================================
 
 (async (axios) => {
 "use strict";
@@ -233,6 +237,12 @@ e.preventDefault();
 this.modules.ui.download();
 }
 });
+if (typeof GM_registerMenuCommand === "function") {
+GM_registerMenuCommand("🖼️ Show FPL Pro Panel", () => {
+if (this.modules.ui.overlay) this.modules.ui.overlay.style.display = "block";
+else this.modules.ui.render();
+});
+}
 }
 };
 
@@ -566,6 +576,185 @@ display: ["counter", "zoom", "slideshow", "fullscreen", "download", "close"]
 }
 });
 }
+}
+
+// ============================================
+// UI MANAGER
+// ============================================
+class UIManager {
+  constructor() {
+    this.overlay = null;
+    this.bookmarks = JSON.parse(GM_getValue("FPL_Bookmarks", "[]"));
+    this.searchResults = [];
+    this.currentSite = null;
+  }
+
+  createOverlay() {
+    if (this.overlay) return this.overlay;
+
+    const overlay = document.createElement("div");
+    overlay.id = "fpl-overlay";
+    overlay.innerHTML = `
+      <div class="fpl-header">
+        <span class="fpl-title">📥 FPL Pro</span>
+        <button class="fpl-btn fpl-minimize">−</button>
+        <button class="fpl-btn fpl-close">×</button>
+      </div>
+      <div class="fpl-body">
+        <div class="fpl-section">
+          <button class="fpl-action-btn" id="fpl-scan">🔍 Scan Page</button>
+          <button class="fpl-action-btn" id="fpl-download">⬇️ Download All</button>
+          <button class="fpl-action-btn" id="fpl-gallery">🖼️ Gallery View</button>
+        </div>
+        <div class="fpl-section fpl-search-section">
+          <input type="text" id="fpl-search" placeholder="Search images..." />
+          <button class="fpl-action-btn" id="fpl-search-btn">🔎</button>
+        </div>
+        <div class="fpl-section fpl-bookmarks-section">
+          <button class="fpl-action-btn" id="fpl-bookmark">🔖 Bookmark Site</button>
+          <button class="fpl-action-btn" id="fpl-view-bookmarks">📑 Bookmarks</button>
+        </div>
+        <div class="fpl-section fpl-options">
+          <label><input type="checkbox" id="fpl-auto" ${FPL?.options?.autoInsert ? 'checked' : ''}/> Auto-scan</label>
+          <label><input type="checkbox" id="fpl-zip" ${FPL?.options?.zip ? 'checked' : ''}/> ZIP download</label>
+          <label><input type="checkbox" id="fpl-comic" ${FPL?.options?.comic ? 'checked' : ''}/> Comic mode</label>
+        </div>
+        <div class="fpl-status" id="fpl-status">Ready</div>
+      </div>
+      <div class="fpl-bookmarks-panel" id="fpl-bookmarks-panel" style="display:none;">
+        <h4>Bookmarked Sites</h4>
+        <ul id="fpl-bookmarks-list"></ul>
+      </div>
+    `;
+
+    const style = document.createElement("style");
+    style.textContent = `
+      #fpl-overlay { position:fixed; top:20px; right:20px; width:280px; background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:999999; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#fff; border:1px solid rgba(255,255,255,0.1); }
+      .fpl-header { display:flex; align-items:center; padding:12px 16px; background:rgba(0,0,0,0.2); border-radius:12px 12px 0 0; cursor:move; }
+      .fpl-title { flex:1; font-weight:600; font-size:14px; }
+      .fpl-btn { background:rgba(255,255,255,0.1); border:none; color:#fff; width:24px; height:24px; border-radius:6px; cursor:pointer; margin-left:8px; font-size:16px; line-height:1; }
+      .fpl-btn:hover { background:rgba(255,255,255,0.2); }
+      .fpl-body { padding:16px; }
+      .fpl-section { margin-bottom:12px; }
+      .fpl-section:last-child { margin-bottom:0; }
+      .fpl-action-btn { width:100%; padding:10px 12px; margin-bottom:8px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); border:none; border-radius:8px; color:#fff; font-size:13px; cursor:pointer; transition:transform 0.2s,box-shadow 0.2s; }
+      .fpl-action-btn:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(102,126,234,0.4); }
+      .fpl-action-btn:active { transform:translateY(0); }
+      .fpl-search-section { display:flex; gap:8px; }
+      .fpl-search-section input { flex:1; padding:8px 12px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; font-size:13px; }
+      .fpl-search-section input::placeholder { color:rgba(255,255,255,0.4); }
+      .fpl-search-section .fpl-action-btn { width:auto; margin:0; }
+      .fpl-options label { display:flex; align-items:center; gap:8px; font-size:12px; color:rgba(255,255,255,0.8); margin-bottom:6px; cursor:pointer; }
+      .fpl-options input[type="checkbox"] { width:16px; height:16px; accent-color:#667eea; }
+      .fpl-status { padding:8px 12px; background:rgba(0,0,0,0.3); border-radius:6px; font-size:12px; color:rgba(255,255,255,0.6); text-align:center; }
+      .fpl-bookmarks-section { display:flex; gap:8px; }
+      .fpl-bookmarks-section .fpl-action-btn { flex:1; }
+      .fpl-bookmarks-panel { position:absolute; top:100%; left:0; right:0; background:rgba(0,0,0,0.9); border-radius:0 0 12px 12px; padding:16px; max-height:300px; overflow-y:auto; }
+      .fpl-bookmarks-panel h4 { margin:0 0 12px 0; font-size:13px; }
+      .fpl-bookmarks-panel ul { list-style:none; padding:0; margin:0; }
+      .fpl-bookmarks-panel li { display:flex; align-items:center; justify-content:space-between; padding:8px; background:rgba(255,255,255,0.05); border-radius:6px; margin-bottom:6px; font-size:12px; }
+      .fpl-bookmarks-panel a { color:#667eea; text-decoration:none; }
+      .fpl-bookmarks-panel a:hover { text-decoration:underline; }
+      .fpl-bookmarks-panel button { background:rgba(255,100,100,0.3); border:none; color:#fff; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px; }
+      #fpl-overlay.minimized .fpl-body { display:none; }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(overlay);
+
+    this.bindEvents(overlay);
+    this.makeDraggable(overlay);
+    this.overlay = overlay;
+    return overlay;
+  }
+
+  bindEvents(overlay) {
+    overlay.querySelector("#fpl-scan").addEventListener("click", () => this.scan());
+    overlay.querySelector("#fpl-download").addEventListener("click", () => this.download());
+    overlay.querySelector("#fpl-gallery").addEventListener("click", () => { if (FPL?.modules?.gallery) FPL.modules.gallery.show(); });
+
+    const searchInput = overlay.querySelector("#fpl-search");
+    overlay.querySelector("#fpl-search-btn").addEventListener("click", () => this.search(searchInput.value));
+    searchInput.addEventListener("keypress", (e) => { if (e.key === "Enter") this.search(searchInput.value); });
+
+    overlay.querySelector("#fpl-bookmark").addEventListener("click", () => this.addBookmark());
+    overlay.querySelector("#fpl-view-bookmarks").addEventListener("click", () => this.toggleBookmarksPanel());
+
+    const autoCb = overlay.querySelector("#fpl-auto");
+    if (autoCb) autoCb.addEventListener("change", (e) => { if (FPL) { FPL.options.autoInsert = e.target.checked; FPL.saveOptions(); } });
+    const zipCb = overlay.querySelector("#fpl-zip");
+    if (zipCb) zipCb.addEventListener("change", (e) => { if (FPL) { FPL.options.zip = e.target.checked; FPL.saveOptions(); } });
+    const comicCb = overlay.querySelector("#fpl-comic");
+    if (comicCb) comicCb.addEventListener("change", (e) => { if (FPL) { FPL.options.comic = e.target.checked; FPL.saveOptions(); } });
+
+    overlay.querySelector(".fpl-minimize").addEventListener("click", () => overlay.classList.toggle("minimized"));
+    overlay.querySelector(".fpl-close").addEventListener("click", () => overlay.style.display = "none");
+  }
+
+  makeDraggable(overlay) {
+    const header = overlay.querySelector(".fpl-header");
+    let isDragging = false, startX, startY, startLeft, startTop;
+    header.addEventListener("mousedown", (e) => { isDragging = true; startX = e.clientX; startY = e.clientY; startLeft = overlay.offsetLeft; startTop = overlay.offsetTop; });
+    document.addEventListener("mousemove", (e) => { if (!isDragging) return; overlay.style.left = `${startLeft + e.clientX - startX}px`; overlay.style.top = `${startTop + e.clientY - startY}px`; overlay.style.right = "auto"; });
+    document.addEventListener("mouseup", () => { isDragging = false; });
+  }
+
+  render() { this.createOverlay(); }
+
+  scan() {
+    this.updateStatus("Scanning...");
+    const site = FPL?.siteRouter?.detect();
+    if (!site) { this.updateStatus("No matching site found"); return; }
+    this.currentSite = site;
+    this.updateStatus(`Found: ${site.name}`);
+  }
+
+  download() {
+    if (!this.currentSite) { this.scan(); return; }
+    this.updateStatus("Downloading...");
+    FPL?.modules?.downloader?.downloadAll?.();
+  }
+
+  search(query) {
+    if (!query) return;
+    const images = FPL?.modules?.downloader?.images || [];
+    const results = images.filter(img => (img.filename || "").toLowerCase().includes(query.toLowerCase()) || (img.url || "").toLowerCase().includes(query.toLowerCase()));
+    this.searchResults = results;
+    this.updateStatus(`Search: ${results.length} matches`);
+  }
+
+  addBookmark() {
+    const bookmark = { url: location.href, title: document.title, site: this.currentSite?.name || "Unknown", date: new Date().toISOString() };
+    this.bookmarks.push(bookmark);
+    GM_setValue("FPL_Bookmarks", JSON.stringify(this.bookmarks));
+    this.updateStatus("Bookmark added!");
+  }
+
+  toggleBookmarksPanel() {
+    const panel = this.overlay.querySelector("#fpl-bookmarks-panel");
+    const isVisible = panel.style.display !== "none";
+    panel.style.display = isVisible ? "none" : "block";
+    if (!isVisible) this.renderBookmarks();
+  }
+
+  renderBookmarks() {
+    const list = this.overlay.querySelector("#fpl-bookmarks-list");
+    if (this.bookmarks.length === 0) { list.innerHTML = "<li>No bookmarks yet</li>"; return; }
+    list.innerHTML = this.bookmarks.map((bm, i) => `<li><a href="${bm.url}" target="_blank">${bm.title}</a><button data-idx="${i}">Delete</button></li>`).join("");
+    list.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => { this.removeBookmark(parseInt(btn.dataset.idx)); });
+    });
+  }
+
+  removeBookmark(index) {
+    this.bookmarks.splice(index, 1);
+    GM_setValue("FPL_Bookmarks", JSON.stringify(this.bookmarks));
+    this.renderBookmarks();
+  }
+
+  updateStatus(msg) {
+    const status = this.overlay?.querySelector("#fpl-status");
+    if (status) status.textContent = msg;
+  }
 }
 
 // ============================================
