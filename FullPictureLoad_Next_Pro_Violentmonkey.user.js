@@ -549,11 +549,13 @@ this.fancyboxLoaded = false;
 async loadFancybox() {
 if (this.fancyboxLoaded) return;
 
-const css = await GM_getResourceText("FancyboxV6Css");
-const js = await GM_getResourceText("FancyboxV6JS");
+const css = await GM.getResourceText("FancyboxV6Css");
+const js = await GM.getResourceText("FancyboxV6JS");
 
-GM_addElement("style", { textContent: css });
-GM_addElement("script", { textContent: js });
+await Promise.all([
+GM.addElement("style", { textContent: css }),
+GM.addElement("script", { textContent: js })
+]);
 
 await $.wait(() => window.Fancybox);
 this.fancyboxLoaded = true;
